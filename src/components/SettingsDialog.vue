@@ -79,6 +79,7 @@
               <el-radio value="openai">通义千问 (Qwen)</el-radio>
               <el-radio value="claude">Claude</el-radio>
               <el-radio value="codex">Codex CLI</el-radio>
+              <el-radio value="ollama">Ollama (Local)</el-radio>
             </el-radio-group>
           </el-form-item>
 
@@ -113,6 +114,7 @@
                 <el-option value="qwen-vl-max-latest" label="Qwen VL Max (最新版)" />
                 <el-option value="qwen-vl-plus" label="Qwen VL Plus" />
                 <el-option value="qwen-vl-max" label="Qwen VL Max" />
+                
               </el-select>
             </el-form-item>
 
@@ -304,7 +306,6 @@
               </div>
             </el-form-item>
 
-
             <el-collapse v-model="codexAdvancedPanels">
               <el-collapse-item name="prompts">
                 <template #title>
@@ -344,6 +345,42 @@
                 </el-form-item>
               </el-collapse-item>
             </el-collapse>
+          </template>
+                      
+          <!-- Ollama 本地模型配置 -->
+          <template v-if="settings.llm_provider === 'ollama'">
+              <div class="llm-header">
+                <h4 style="margin: 0 0 20px 0; color: #67C23A;">
+                  Ollama（本地模型）
+                </h4>
+              </div>
+
+              <el-form-item label="API 地址">
+                <el-input
+                  v-model="llmConfig.ollama.base_url"
+                  placeholder="http://127.0.0.1:11434"
+                />
+                <span class="form-tip">本地 Ollama 服务地址</span>
+              </el-form-item>
+
+              <el-form-item label="模型">
+                <el-input
+                  v-model="llmConfig.ollama.model"
+                  placeholder="qwen3-vl:32b / qwen2.5-vl"
+                />
+                <span class="form-tip">必须是支持 Vision 的模型</span>
+              </el-form-item>
+
+              <el-form-item>
+                <el-button
+                  type="primary"
+                  size="small"
+                  @click="testLLMAPI('ollama')"
+                  :loading="testingAPI"
+                >
+                  测试连接
+                </el-button>
+              </el-form-item>
           </template>
         </el-form>
       </el-tab-pane>
@@ -870,6 +907,10 @@ const llmConfig = reactive({
     model: 'qwen-vl-max-latest',
     base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions'
   },
+  ollama: {
+    base_url: 'http://127.0.0.1:11434',
+    model: 'qwen3-vl:32b'
+  },
   claude: {
     model: 'claude-sonnet-4-5',
     auth_token: '',
@@ -1309,6 +1350,12 @@ const saveSettings = async () => {
       }
       console.log('配置 Codex:', codexPayload)
       await store.configureLLMProvider('codex', codexPayload)
+    } else if (settings.llm_provider === 'ollama') {
+      const ollamaPayload = buildLLMConfigPayload('ollama')
+      if (!ollamaPayload.base_url) ollamaPayload.base_url = 'http://127.0.0.1:11434'
+      if (!ollamaPayload.model) ollamaPayload.model = 'qwen3-vl:32b'
+      console.log('配置 Ollama:', ollamaPayload)
+      await store.configureLLMProvider('ollama', ollamaPayload)
     }
 
     ElMessage.success('设置已保存，如果修改了数据库配置请重启应用')
