@@ -85,6 +85,38 @@ pub async fn analyze_video_once(
             // 注意：启动时已经根据配置切换到了正确的 provider，这里无需再次切换
             info!("使用 Claude provider 进行视频分析（API key 可选）");
         }
+        "ollama" => {
+        // ✅ 新增：Ollama provider 配置
+        let ollama_cfg = if let Some(llm_config) = persisted_config.llm_config {
+            llm::OllamaConfig {
+                base_url: llm_config.base_url,          // 你存储结构里叫啥用啥
+                model: llm_config.model,
+                use_video_mode: llm_config.use_video_mode,
+                video_path: Some(video_path_str.clone()),
+            }
+        } else {
+            let config = llm_handle.get_config().await.map_err(|e| e.to_string())?;
+            llm::OllamaConfig {
+                base_url: config.ollama.base_url.clone(),
+                model: config.ollama.model.clone(),
+                use_video_mode: true,
+                video_path: Some(video_path_str.clone()),
+            }
+        };
+
+        if ollama_cfg.base_url.trim().is_empty() {
+            return Err("请先在设置中配置 Ollama API 地址".to_string());
+        }
+        if ollama_cfg.model.trim().is_empty() {
+            return Err("请先在设置中配置 Ollama 模型名称".to_string());
+        }
+
+        if let Err(e) = llm_handle.configure(ollama_cfg).await {
+            return Err(e.to_string());
+        }
+
+        info!("使用 Ollama provider 进行视频分析: {} / {}", ollama_cfg.base_url, ollama_cfg.model);
+        }
         _ => {
             return Err(format!("不支持的 LLM provider: {}", current_provider));
         }

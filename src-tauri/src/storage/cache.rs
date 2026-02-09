@@ -219,6 +219,13 @@ impl DatabaseRepository for CachedRepository {
         self.clear_cache().await;
         Ok(count)
     }
+    // async fn get_old_sessions(&self, cutoff_date: DateTime<Utc>) -> Result<Vec<Session>> {
+    //     // list/filtered query: don't cache; delegate to inner repo
+    //     self.inner.get_old_sessions(cutoff_date).await
+    // }
+    async fn get_old_sessions(&self, cutoff_date: chrono::DateTime<chrono::Utc>) -> Result<Vec<Session>> {
+        self.inner.get_old_sessions(cutoff_date).await
+    }
 
     async fn delete_session(&self, session_id: i64) -> Result<()> {
         self.inner.delete_session(session_id).await?;

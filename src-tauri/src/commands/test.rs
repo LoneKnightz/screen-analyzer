@@ -47,6 +47,7 @@ pub async fn test_llm_api(
             test_claude_sdk_api(config).await
         }
         "codex" => test_codex_cli(config).await,
+        "ollama" => test_ollama_api(config).await,
         _ => Err(format!("不支持的提供商: {}", provider)),
     };
 
@@ -321,4 +322,43 @@ pub async fn test_claude_sdk_api(config: serde_json::Value) -> Result<String, St
     }
 
     Ok(response_text)
+}
+
+/// 测试 ollama SDK API
+async fn test_ollama_api(config: serde_json::Value) -> Result<String, String> {
+    // 读取 base_url（前端传进来的）
+    let base_url = config
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("http://127.0.0.1:11434")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+
+    let url = format!("{}/api/tags", base_url);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("无法连接 Ollama：{} ({})", e, url))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("Ollama 返回异常状态码：{} ({})", resp.status(), url));
+    }
+
+    // 解析一下看看有没有 models（不强制，但可以给更友好的提示）
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 Ollama 返回失败：{}", e))?;
+
+    let n = json
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    Ok(format!("Ollama 连接成功：发现 {} 个模型（{}）", n, base_url))
 }

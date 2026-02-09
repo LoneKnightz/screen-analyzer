@@ -4,6 +4,9 @@ pub mod claude;
 pub mod codex;
 pub mod plugin;
 pub mod qwen;
+pub mod ollama;
+pub use ollama::OllamaProvider;
+
 
 pub use claude::ClaudeProvider;
 pub use codex::CodexProvider;
@@ -43,6 +46,9 @@ pub struct LLMConfig {
     /// Claude配置（目前无需额外配置）
     #[serde(default)]
     pub claude: ClaudeConfig,
+    /// Ollama 配置
+    #[serde(default)]
+    pub ollama: OllamaConfig,
     /// Codex配置
     #[serde(default)]
     pub codex: CodexConfig,
@@ -59,6 +65,31 @@ fn default_provider() -> String {
 pub struct ClaudeConfig {
     pub api_key: Option<String>,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct OllamaConfig {
+    #[serde(default = "default_ollama_base_url")]
+    pub base_url: String,
+    #[serde(default = "default_ollama_model")]
+    pub model: String,
+}
+
+impl Default for OllamaConfig {
+    fn default() -> Self {
+        Self {
+            base_url: default_ollama_base_url(),
+            model: default_ollama_model(),
+        }
+    }
+}
+
+fn default_ollama_base_url() -> String {
+    "http://localhost:11434".to_string()
+}
+
+fn default_ollama_model() -> String {
+    "qwen3-vl:32b".to_string()
 }
 
 /// Codex配置
@@ -159,6 +190,7 @@ impl LLMManager {
                 },
                 claude: ClaudeConfig::default(),
                 codex: CodexConfig::default(),
+                ollama: OllamaConfig::default(),
                 analysis_params: AnalysisParams::default(),
             })),
             http_client: Some(client),
@@ -202,6 +234,7 @@ impl LLMManager {
             _ => {
                 warn!("未知的 provider: {}", provider_name);
             }
+
         }
 
         Ok(())
@@ -239,6 +272,20 @@ impl LLMManager {
             "codex" => {
                 self.provider = Box::new(CodexProvider::new());
             }
+            // "ollama" => {
+            //     self.provider = Box::new(OllamaProvider::new());
+            // }
+            "ollama" => {
+                let client = self
+                    .http_client
+                    .clone()
+                    .ok_or_else(|| anyhow!("无法切换到 Ollama provider: HTTP 客户端未初始化"))?;
+                self.provider = Box::new(OllamaProvider::new(client));
+
+                // 可选：应用已保存的 ollama 配置
+                let cfg = { self.config_lock.read().await.ollama.clone() };
+                self.provider.configure(serde_json::to_value(cfg)?)?;
+            }
             _ => {
                 return Err(anyhow!("不支持的 provider: {}", provider_name));
             }
@@ -269,6 +316,25 @@ impl LLMManager {
         }
 
         info!("Claude 配置已更新");
+        Ok(())
+    }
+    /// 配置 ollama provider
+    pub async fn configure_ollama(&mut self, config: OllamaConfig) -> Result<()> {
+        // 如果当前 provider 不是 ollama，也允许配置（只是更新 config 存储）
+        let cfg_json = serde_json::to_value(&config)?;
+        if let Some(p) = self.provider.as_any().downcast_mut::<OllamaProvider>() {
+            p.configure(cfg_json)?;
+        } else {
+            // 如果当前 provider 不是 ollama，但你想切换过去：
+            self.provider = Box::new(OllamaProvider::new(
+                self.http_client.clone().ok_or_else(|| anyhow!("HTTP client missing"))?,
+            ));
+            self.provider.configure(cfg_json)?;
+        }
+
+        let mut current = self.config_lock.write().await;
+        current.provider = "ollama".to_string();
+        current.ollama = config;
         Ok(())
     }
 
@@ -381,6 +447,17 @@ impl LLMManager {
             info!("已为 Codex provider 设置数据库连接");
             return;
         }
+        // Ollama provider
+        if let Some(provider) = self.provider.as_any().downcast_mut::<OllamaProvider>() {
+            provider.set_database(db.clone());
+            if let Some(sid) = session_id {
+                provider.set_session_id(sid);
+            }
+            info!("为 Ollama provider 设置数据库连接");
+            return;
+        }
+
+
     }
 
     /// 生成时间线卡片（公开方法）
@@ -1378,6 +1455,18 @@ pub fn sanitize_request_body(value: &Value) -> String {
                                     // 如果都是普通 URL，保留数组
                                     new_map.insert(key.clone(), Value::Array(cleaned_arr));
                                 }
+                                continue;
+                            }
+                            new_map.insert(key.clone(), remove_base64(v));
+                        }
+                        "images" => {
+                            if let Value::Array(arr) = v {
+                                // Ollama: images: ["<base64>", ...]
+                                let count = arr.len();
+                                new_map.insert(
+                                    key.clone(),
+                                    Value::String(format!("[{} BASE64_IMAGES_REMOVED]", count)),
+                                );
                                 continue;
                             }
                             new_map.insert(key.clone(), remove_base64(v));

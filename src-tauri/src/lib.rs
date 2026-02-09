@@ -1590,6 +1590,7 @@ async fn test_llm_api(
             test_claude_sdk_api(config).await
         }
         "codex" => test_codex_cli(config).await,
+        "ollama" => test_ollama_api(config).await,  
         _ => Err(format!("不支持的提供商: {}", provider)),
     };
 
@@ -1952,6 +1953,46 @@ async fn test_claude_sdk_api(config: serde_json::Value) -> Result<String, String
 
     Ok(response_text)
 }
+
+async fn test_ollama_api(config: serde_json::Value) -> Result<String, String> {
+    let base_url = config
+        .get("base_url")
+        .and_then(|v| v.as_str())
+        .unwrap_or("http://127.0.0.1:11434")
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+
+    let url = format!("{}/api/tags", base_url);
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| format!("无法连接 Ollama：{} ({})", e, url))?;
+
+    let status = resp.status();
+
+    if !status.is_success() {
+        let t = resp.text().await.unwrap_or_default();
+        return Err(format!("Ollama 返回异常状态码：{}，响应：{}", status, t));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析 Ollama 返回失败：{}", e))?;
+
+    let n = json
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+
+    Ok(format!("Ollama 连接成功：发现 {} 个模型（{}）", n, base_url))
+}
+
 
 /// 测试 Notion API 连接
 #[tauri::command]
