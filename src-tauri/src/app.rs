@@ -287,7 +287,8 @@ pub fn run() {
 
                 // 创建共享的 HTTP 客户端（用于 LLM API 调用，复用连接池提升性能）
                 let http_client = reqwest::Client::builder()
-                    .timeout(std::time::Duration::from_secs(300))
+// .timeout(std::time::Duration::from_secs(300)) 
+                    .timeout(std::time::Duration::from_secs(1200))
                     .pool_max_idle_per_host(10)
                     .build()
                     .expect("无法创建 HTTP 客户端");
@@ -540,6 +541,23 @@ pub fn run() {
                                         error!("加载 Codex 配置失败: {}", e);
                                     } else {
                                         info!("已从配置文件加载 Codex 设置");
+                                    }
+                                }
+                                "ollama" => {
+                                    let ollama_config = llm::OllamaConfig {
+                                        base_url: llm_config.base_url,
+                                        model: llm_config.model,
+                                    };
+
+                                    if let Err(e) = state_clone
+                                        .analysis_domain
+                                        .get_llm_handle()
+                                        .configure_ollama(ollama_config)
+                                        .await
+                                    {
+                                        error!("加载 Ollama 配置失败: {}", e);
+                                    } else {
+                                        info!("已从配置文件加载 Ollama 设置");
                                     }
                                 }
                                 _ => {

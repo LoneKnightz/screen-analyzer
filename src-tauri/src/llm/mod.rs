@@ -85,7 +85,7 @@ impl Default for OllamaConfig {
 }
 
 fn default_ollama_base_url() -> String {
-    "http://localhost:11434".to_string()
+    "http://100.82.18.91:11434".to_string()
 }
 
 fn default_ollama_model() -> String {
@@ -1075,15 +1075,17 @@ impl crate::capture::scheduler::SessionProcessor for LLMProcessor {
                     Ok(result) => {
                         info!("视频生成成功: {}", result.file_path);
                         video_path = Some(result.file_path.clone());
-                        should_persist_frames = false;
-
-                        info!("删除 {} 个原始图片文件...", all_frame_paths.len());
+// 🔴🔴🔴 修改 1: 注释掉这就话，确保 frames 会被写入数据库，避免成为僵尸文件 🔴🔴🔴
+                        // should_persist_frames = false;
+// 🔴🔴🔴 修改 2: 注释掉删除文件的循环 🔴🔴🔴
+                        /* info!("删除 {} 个原始图片文件...", all_frame_paths.len());
                         for frame_path in &all_frame_paths {
                             if let Err(e) = tokio::fs::remove_file(frame_path).await {
                                 error!("删除图片文件失败 {}: {}", frame_path, e);
                             }
                         }
                         info!("原始图片文件已删除");
+                        */
                     }
                     Err(e) => {
                         error!("视频生成失败: {}，保留原始图片", e);

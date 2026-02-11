@@ -719,6 +719,8 @@ async fn generate_video(
             e.to_string()
         })?;
 
+    // // 清理frame文件夹中的图片（视频已生成，不再需要原始图片）
+    /* <-- 添加注释开始
     // 清理frame文件夹中的图片（视频已生成，不再需要原始图片）
     let mut deleted_count = 0;
     let mut failed_count = 0;
@@ -745,6 +747,7 @@ async fn generate_video(
         failed_count,
         all_frames.len()
     );
+    */ // <-- 添加注释结束
 
     Ok(result.file_path)
 }
@@ -1169,6 +1172,39 @@ async fn configure_llm_provider(
                 codex_config: Some(stored),
             }
         }
+        // ✅ 新增以下 Ollama 分支
+    "ollama" => {
+        let ollama_config = llm::OllamaConfig {
+            base_url: config
+                .get("base_url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("http://100.82.18.91:11434")
+                .to_string(),
+            model: config
+                .get("model")
+                .and_then(|v| v.as_str())
+                .unwrap_or("qwen3-vl:32b")
+                .to_string(),
+        };
+
+        // 1. 更新内存中的 LLM Manager
+        state
+            .analysis_domain
+            .get_llm_handle()
+            .configure_ollama(ollama_config.clone()) // 需确保 LLMHandle 暴露了此方法，或者使用通用的 configure
+            .await
+            .map_err(|e| e.to_string())?;
+
+        // 2. 准备存入 settings 的配置
+        models::LLMProviderConfig {
+            api_key: String::new(),
+            model: ollama_config.model,
+            base_url: ollama_config.base_url,
+            use_video_mode: true, // Ollama 通常逐帧分析，但也支持 vision
+            auth_token: String::new(),
+            codex_config: None,
+        }
+    }
         _ => {
             return Err(format!("不支持的提供商: {}", provider));
         }
@@ -3010,6 +3046,34 @@ async fn analyze_video_once(
             // Claude provider 的 API key 是可选的（可以使用 CLI 凭据）
             // 不需要额外配置，已经在启动时配置过了
             info!("使用 Claude provider 进行视频分析（API key 可选）");
+        }
+        // ✅ 新增以下 Ollama 分支
+        "ollama" => {
+            let ollama_cfg = if let Some(llm_config) = persisted_config.llm_config {
+                llm::OllamaConfig {
+                    base_url: llm_config.base_url,
+                    model: llm_config.model,
+                }
+            } else {
+                let config = llm_handle.get_config().await.map_err(|e| e.to_string())?;
+                llm::OllamaConfig {
+                    base_url: config.ollama.base_url.clone(),
+                    model: config.ollama.model.clone(),
+                }
+            };
+            
+            // 配置 Ollama 并传入视频路径（如果 OllamaProvider 支持 video_path）
+            // 注意：OllamaProvider struct 目前似乎没有 video_path 字段，
+            // 如果你需要像 Qwen 那样支持视频模式，需要在 ollama.rs 的 configure 中处理
+            
+            if let Err(e) = llm_handle.configure_ollama(ollama_cfg).await {
+                return Err(e.to_string());
+            }
+            
+            // 设置视频路径
+            if let Err(e) = llm_handle.set_video_path(Some(video_path_str.clone())).await {
+                return Err(e.to_string());
+            }
         }
         _ => {
             return Err(format!("不支持的 LLM provider: {}", current_provider));

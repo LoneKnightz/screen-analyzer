@@ -16,7 +16,7 @@ pub struct OllamaProvider {
     base_url: String, // e.g. http://localhost:11434
     model: String,    // e.g. qwen3-vl:32b
     configured: bool,
-        // 新增：用于记录 LLM 调用、写库等（先放着也行）
+    // 新增：用于记录 LLM 调用、写库等（先放着也行）
     db: Option<Arc<crate::storage::Database>>,
     session_id: Option<i64>,
 }
@@ -25,7 +25,7 @@ impl OllamaProvider {
     pub fn new(client: Client) -> Self {
         Self {
             client,
-            base_url: "http://localhost:11434".to_string(),
+            base_url: "http://100.82.18.91:11434".to_string(),
             model: "qwen3-vl:32b".to_string(),
             configured: true, // Ollama 通常不需要 key；有 base_url 就算可用
             db: None,
@@ -57,7 +57,7 @@ impl OllamaProvider {
     fn build_prompt(&self) -> String {
         // 建议沿用你们 Qwen/Claude 的结构化输出要求，确保可解析为 SessionSummary
         r#"
-请分析这些屏幕截图，识别用户的活动并输出 **严格 JSON**（不要多余文本，不要 markdown）。
+请分析这些屏幕截图，识别用户的活动并输出 严格 JSON（不要多余文本，不要 markdown）。
 
 JSON schema:
 {
@@ -140,12 +140,26 @@ JSON schema:
 
     fn parse_session_summary(&self, raw: &str) -> Result<SessionSummary> {
         let json_text = self.extract_json_text(raw);
-        let v: Value = serde_json::from_str(json_text)
+        // 将 JSON 解析为 Value，以便我们可以在转换 Struct 之前修改它
+        let mut v: Value = serde_json::from_str(json_text)
             .map_err(|e| anyhow!("Ollama 返回不是合法 JSON: {e}; raw={}", raw))?;
 
+        // ✅ 关键修复：手动注入缺失的时间字段
+        // LLM 不知道绝对时间，所以我们在这里给一个默认值（当前时间）
+        // 后续业务逻辑通常会用真实的会话时间覆盖它
+        if let Some(obj) = v.as_object_mut() {
+            let now = Utc::now();
+            if !obj.contains_key("start_time") {
+                obj.insert("start_time".to_string(), serde_json::to_value(now)?);
+            }
+            if !obj.contains_key("end_time") {
+                obj.insert("end_time".to_string(), serde_json::to_value(now)?);
+            }
+        }
+
+        // 现在再转换为 SessionSummary Struct
         let mut summary: SessionSummary = serde_json::from_value(v)?;
-        // 如果模型没填时间，给默认值（plugin.rs 的 Default 也是这么干的思路）
-        // 这里保持不强依赖字段存在：如缺失则回退到 now。
+        
         let now = Utc::now();
         if summary.start_time > summary.end_time {
             summary.start_time = now;
@@ -218,6 +232,4 @@ impl LLMProvider for OllamaProvider {
             supported_image_formats: vec!["jpg".to_string(), "jpeg".to_string(), "png".to_string()],
         }
     }
-
-
 }

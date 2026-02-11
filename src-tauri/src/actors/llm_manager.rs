@@ -1,8 +1,10 @@
+// src-tauri/src/actors/llm_manager.rs
 // LLM Manager Actor - 使用Actor模式管理LLM状态
 //
 // 用消息传递替代锁机制，消除Arc<Mutex<LLMManager>>的锁竞争
 
-use crate::llm::{CodexConfig, LLMConfig, LLMManager, QwenConfig, SessionBrief, SessionSummary};
+// ✅ 修改 1: 引入 OllamaConfig
+use crate::llm::{CodexConfig, LLMConfig, LLMManager, OllamaConfig, QwenConfig, SessionBrief, SessionSummary};
 use anyhow::Result;
 use tokio::sync::{mpsc, oneshot};
 
@@ -13,7 +15,7 @@ use std::sync::Arc;
 
 /// LLM管理器命令
 pub enum LLMCommand {
-    /// 配置LLM
+    /// 配置LLM (Qwen)
     Configure {
         config: QwenConfig,
         reply: oneshot::Sender<Result<()>>,
@@ -22,6 +24,13 @@ pub enum LLMCommand {
     /// 配置 Codex provider
     ConfigureCodex {
         config: CodexConfig,
+        reply: oneshot::Sender<Result<()>>,
+    },
+
+    // ✅ 修改 2: 新增配置 Ollama 的命令
+    /// 配置 Ollama provider
+    ConfigureOllama {
+        config: OllamaConfig,
         reply: oneshot::Sender<Result<()>>,
     },
 
@@ -135,6 +144,14 @@ impl LLMManagerActor {
                     let _ = reply.send(result);
                 }
 
+                // ✅ 修改 3: 处理 Ollama 配置命令
+                LLMCommand::ConfigureOllama { config, reply } => {
+                    // 注意：这里假设您的 LLMManager 结构体已经实现了 configure_ollama 方法
+                    // 如果尚未实现，您需要在 src/llm/manager.rs 中添加该方法
+                    let result = self.manager.configure_ollama(config).await;
+                    let _ = reply.send(result);
+                }
+
                 LLMCommand::AnalyzeFrames { frames, reply } => {
                     let result = self.manager.analyze_frames(frames).await;
                     let _ = reply.send(result);
@@ -239,7 +256,7 @@ pub struct LLMHandle {
 }
 
 impl LLMHandle {
-    /// 配置LLM
+    /// 配置LLM (Qwen)
     pub async fn configure(&self, config: QwenConfig) -> Result<()> {
         let (reply, rx) = oneshot::channel();
         self.sender
@@ -253,6 +270,16 @@ impl LLMHandle {
         let (reply, rx) = oneshot::channel();
         self.sender
             .send(LLMCommand::ConfigureCodex { config, reply })
+            .await
+            .map_err(|_| anyhow::anyhow!("Actor通道已关闭"))?;
+        rx.await.map_err(|_| anyhow::anyhow!("Actor已停止"))?
+    }
+
+    // ✅ 修改 4: 新增 configure_ollama 方法供 lib.rs 调用
+    pub async fn configure_ollama(&self, config: OllamaConfig) -> Result<()> {
+        let (reply, rx) = oneshot::channel();
+        self.sender
+            .send(LLMCommand::ConfigureOllama { config, reply })
             .await
             .map_err(|_| anyhow::anyhow!("Actor通道已关闭"))?;
         rx.await.map_err(|_| anyhow::anyhow!("Actor已停止"))?
@@ -388,8 +415,6 @@ impl LLMHandle {
         rx.await.map_err(|_| anyhow::anyhow!("Actor已停止"))?
     }
 
-    /// 健康检查 - 测试Actor是否响应
-    ///
     /// 生成每日总结
     pub async fn generate_day_summary(
         &self,
@@ -434,7 +459,6 @@ impl LLMHandle {
     /// 健康检查
     /// 返回true表示Actor正常运行，false表示Actor无响应或已停止
     /// 超时时间为5秒
-
     pub async fn health_check(&self) -> bool {
         let (reply, rx) = oneshot::channel();
 

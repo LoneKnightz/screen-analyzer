@@ -804,9 +804,10 @@ impl NotionClient {
                     "title": {}
                 },
                 "日期": {
-                    "date": {
-                        "time_zone": system_timezone
-                    }
+                    // "date": {
+                    //     "time_zone": system_timezone
+                    // }
+                        "date": {}
                 },
                 "总结": {
                     "rich_text": {}
